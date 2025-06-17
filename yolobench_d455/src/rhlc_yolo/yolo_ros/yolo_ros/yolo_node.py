@@ -60,9 +60,8 @@ class YoloNode(Node):
         )
 
         self.cv_bridge = CvBridge()
-        # Detection timing tracking
-        self.object_last_detection = {}  # Track when objects were last detected
-        self.detection_time_ms = {}      # Store detection timing values
+        # Store current frame's inference time
+        self.current_inference_time_ms = 0
         self.yolo = YOLO(model)
         self.yolo.fuse()
 
@@ -89,31 +88,9 @@ class YoloNode(Node):
         res.success = True
         return res
 
-    def get_detection_time(self, obj_id, class_name):
-        """Get detection time in milliseconds"""
-        now = time.time() * 1000  # Current time in ms
-        unique_id = f"{class_name}_{obj_id}"
-        
-        if unique_id not in self.object_last_detection:
-            # First detection
-            self.object_last_detection[unique_id] = now
-            self.detection_time_ms[unique_id] = 0
-            return 0
-            
-        # Calculate time since last detection
-        time_diff = now - self.object_last_detection[unique_id]
-        
-        # If gap is significant (object was lost and now found)
-        if time_diff > 100:  # 100ms threshold for redetection
-            self.detection_time_ms[unique_id] = int(time_diff)
-        else:
-            # Continuous detection, no significant gap
-            self.detection_time_ms[unique_id] = 0
-            
-        # Update last detection time
-        self.object_last_detection[unique_id] = now
-        
-        return self.detection_time_ms[unique_id]
+    def get_detection_time(self):
+        """Get YOLO inference time in milliseconds"""
+        return self.current_inference_time_ms
 
     def parse_hypothesis(self, results: Results) -> List[Dict]:
 
@@ -209,6 +186,10 @@ class YoloNode(Node):
 
             # convert image + predict
             cv_image = self.cv_bridge.imgmsg_to_cv2(msg)
+            
+            # Start timing YOLO inference
+            start_time = time.time()
+            
             results = self.yolo.predict(
                 source=cv_image,
                 verbose=False,
@@ -216,6 +197,11 @@ class YoloNode(Node):
                 conf=self.threshold,
                 device=self.device
             )
+            
+            # End timing and convert to milliseconds
+            end_time = time.time()
+            self.current_inference_time_ms = int((end_time - start_time) * 1000)
+            
             results: Results = results[0].cpu()
 
             if results.boxes:
@@ -241,8 +227,8 @@ class YoloNode(Node):
                     aux_msg.score = hypothesis[i]["score"]
                     aux_msg.bbox = boxes[i]
                     
-                    # Add detection timing to the message
-                    aux_msg.detection_time_ms = self.get_detection_time(i, aux_msg.class_name)
+                    # Add YOLO inference time to the message
+                    aux_msg.detection_time_ms = self.get_detection_time()
 
                 if results.masks:
                     aux_msg.mask = masks[i]
