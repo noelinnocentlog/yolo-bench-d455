@@ -1,6 +1,5 @@
 # Ignore external dependencies
-/yolo-bench-d455/src/realsense-ros-d455/
-/yolo-bench-d455/src/librealsense-d455/
+rhlc_sensors/
 
 # Ignore build, install, and log directories
 /build/
